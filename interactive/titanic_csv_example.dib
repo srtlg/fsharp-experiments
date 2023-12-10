@@ -1,0 +1,161 @@
+#!meta
+
+{"kernelInfo":{"defaultKernelName":null,"items":[{"name":"csharp","languageName":"C#","aliases":["c#","cs"]},{"name":"fsharp","languageName":"F#","aliases":["f#","fs"]},{"name":"pwsh","languageName":"PowerShell","aliases":["powershell"]},{"name":"javascript","languageName":"JavaScript","aliases":["js"]},{"name":"html","languageName":"HTML"},{"name":"sql","languageName":"SQL"},{"name":"kql","languageName":"KQL"},{"name":"mermaid","languageName":"Mermaid"},{"name":"httpRequest","languageName":"http"},{"name":"value"}]}}
+
+#!markdown
+
+# Titanic data type provider example
+
+* idea from [Tomas Petricek](https://www.youtube.com/watch?v=yjBdZduc0ko)
+* Fedora 38
+* .NET 7.0
+* Polyglot Notebooks v1.0.3611020
+* only Plotly.NET seems to run under Linux
+
+#!fsharp
+
+#r "nuget: FSharp.Data"
+open FSharp.Data
+open System
+
+#!fsharp
+
+open FSharp.Data
+[<Literal>]
+let TitanicURL = "https://github.com/datasciencedojo/datasets/raw/master/titanic.csv"
+type Titanic = CsvProvider<TitanicURL>
+let titanic = Titanic.Load(TitanicURL)
+
+#!fsharp
+
+titanic.Rows |> Seq.length
+
+#!fsharp
+
+titanic.Rows
+|> Seq.filter (fun x -> x.Survived)
+|> Seq.length
+
+#!fsharp
+
+seq { for row in titanic.Rows do row.Sex } |> Seq.distinct
+
+#!fsharp
+
+titanic.Rows |> Seq.map (fun x -> x.Sex) |> Seq.distinct
+
+#!fsharp
+
+let men_survived = 
+    titanic.Rows 
+    |> Seq.filter (fun x -> x.Survived && x.Sex = "male")
+    |> Seq.length
+let women_survived = 
+    titanic.Rows
+    |> Seq.filter (fun x -> x.Survived && x.Sex = "female")
+    |> Seq.length
+let survived_sex = 
+    titanic.Rows
+    |> Seq.countBy (fun x -> x.Sex)
+    |> Seq.map (fun (sex, count) -> 
+        let survived = titanic.Rows |> Seq.filter (fun x -> x.Survived && x.Sex = sex) |> Seq.length
+        sex, 100.0 * (float survived) / (float count))
+let survived_sex_percentage sex = 
+    survived_sex 
+    |> Seq.filter (fun (sex_, percentage) -> sex_ = sex)
+    |> Seq.head
+    |> snd
+printfn "%d (%.0f%%) men and %d (%.0f%%) woman survived" 
+    men_survived (survived_sex_percentage "male") 
+    women_survived (survived_sex_percentage "female")
+
+#!fsharp
+
+let age_known = titanic.Rows |> Seq.map (fun x -> x.Age) |> Seq.filter (fun x ->  x=x) |> Seq.length
+let age_unknown = (titanic.Rows |> Seq.length) - age_known
+printfn "of %d passengers, the age is not known" age_unknown
+
+#!fsharp
+
+titanic.Rows |> Seq.map (fun x -> x.Pclass) |> Seq.distinct
+
+#!fsharp
+
+titanic.Rows // |> Seq.take 100 
+|> Seq.groupBy (fun x -> x.Pclass)
+|> Seq.map (fun (pclass, passangers) -> 
+    pclass, 
+    passangers |> Seq.countBy (fun passanger -> passanger.Survived), 
+    passangers |> Seq.length)
+|> Seq.map (fun (pclass, counted, total) ->
+    pclass, 
+    counted 
+        |> Seq.map (fun (survived, count) -> survived, round (100.0 * (float count) / (float total)))
+        |> Seq.sortBy (fun (survived, count) -> survived))
+|> Seq.sortBy (fun (pclass, counted) -> pclass)
+
+#!markdown
+
+#r "nuget: XPlot.Plotly.Interactive,3.0.1"
+
+#!markdown
+
+open XPlot.Plotly.I
+
+titanic.Rows // |> Seq.take 100 
+|> Seq.groupBy (fun x -> x.Pclass)
+|> Seq.map (fun (pclass, passangers) -> 
+    pclass, passangers |> Seq.countBy (fun passanger -> passanger.Survived))
+|> Seq.map (fun (pclass, counts) ->
+    [for b, v in counts -> (if b then "Survived" else "Died"), v]
+    |> List.sort
+    |> Chart.Pie
+    |> Chart.WithTitle(sprintf "Class %d" pclass)
+    |> Chart.WithSize (600, 200)
+)
+
+#!markdown
+
+#r "nuget: ScottPlot"
+
+#!markdown
+
+open ScottPlot
+let plt = Plot(400, 300)
+titanic.Rows // |> Seq.take 100 
+|> Seq.groupBy (fun x -> x.Pclass)
+|> Seq.map (fun (pclass, passangers) -> 
+    pclass, 
+    passangers |> Seq.countBy (fun passanger -> passanger.Survived))
+|> Seq.map (fun (pclass, counted) ->
+    pclass, 
+    counted |> Seq.sortBy (fun (survived, count) -> survived))
+|> Seq.sortBy (fun (pclass, counted) -> pclass)
+|> Seq.map (fun (pclass, counted) ->
+    let data = [|for survived, percentage in counted -> (float percentage) |]
+    plt.AddPie data)
+plt
+
+#!fsharp
+
+#r "nuget: Plotly.NET"
+#r "nuget: Plotly.NET.Interactive"
+
+#!fsharp
+
+open Plotly.NET
+
+titanic.Rows // |> Seq.take 100 
+|> Seq.groupBy (fun x -> x.Pclass)
+|> Seq.map (fun (pclass, passangers) -> 
+    pclass, 
+    passangers |> Seq.countBy (fun passanger -> passanger.Survived))
+|> Seq.map (fun (pclass, counted) ->
+    pclass, 
+    counted |> Seq.sortBy (fun (survived, count) -> survived))
+|> Seq.sortBy (fun (pclass, counted) -> pclass)
+|> Seq.map (fun (pclass, counted) ->
+    [for b, v in counted -> v, (if b then "Survived" else "Died")]
+    |> Chart.Pie)
+|> Chart.Grid(1, 3)
+|> Chart.withSize(600, 300)
